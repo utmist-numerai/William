@@ -108,7 +108,7 @@ autoencoder.compile(optimizer='adam', loss='binary_crossentropy')
 # Separate encoder for dimension reduction later
 encoder = Model(input_data, bottleneck)
 
-es = tf.keras.callbacks.EarlyStopping(monitor='loss', mode='min', verbose=1, patience=1500,
+es = tf.keras.callbacks.EarlyStopping(monitor='loss', mode='min', verbose=1, patience=10,
                                       restore_best_weights=True)
 
 # Standardize train data
@@ -122,11 +122,10 @@ X_val_tf = tf.convert_to_tensor(X_val)
 
 # Train the autoencoder
 autoencoder.fit(X_train_tf, X_train_tf, epochs=100, batch_size=X_train.shape[0] // 100,
-                shuffle=True, callbacks=es, validation_data=(X_val_tf, X_val_tf))
+              shuffle=True, callbacks=es, validation_data=(X_val_tf, X_val_tf))
 
 # SVM
-spinner = Halo(text='', spinner='dots')
-spinner.start("starting svm\n")
+spinner = Halo(text='', spinner='dots', color='cyan')
 
 # subset X_train
 X_train, X_rest, Y_train, Y_rest = sklearn.model_selection.train_test_split(X_train, Y_train, test_size=0.9)
@@ -150,6 +149,7 @@ Y_train = le.transform(Y_train)
 Y_val = le.transform(Y_val)
 
 # Training model
+spinner.start("starting svm\n")
 model = svm.SVC()
 model.fit(X_train, Y_train)
 Y_hat = model.predict(X_val)
