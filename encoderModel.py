@@ -9,8 +9,9 @@ import json
 import sklearn.metrics
 import tensorflow as tf
 from halo import Halo
-from keras.layers import Dense
+from keras.layers import Dense, Activation, BatchNormalization
 from keras import Model
+from keras import Sequential
 from keras import regularizers
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, LabelEncoder
 from sklearn.metrics import mean_squared_error
@@ -74,49 +75,65 @@ all_feature_corrs = training_data.groupby(ERA_COL).apply(
 riskiest_features = get_biggest_change_features(all_feature_corrs, 50)
 gc.collect()
 
+
+
 # Building the encoder
 data_dim = len(features)
-encoding_dim = 40
+encoding_dim = 20
 input_data = keras.Input(shape=(data_dim, ))
 # Encoder layers
-e1 = Dense(encoding_dim * 5, activation='relu')(input_data)
-e1 = keras.layers.BatchNormalization()(e1)
-e2 = Dense(encoding_dim, activation='sigmoid')(e1)
-e2 = keras.layers.BatchNormalization()(e2)
+e1 = Dense(encoding_dim * 5)(input_data)
+e1 = BatchNormalization()(e1)
+e1 = Activation('relu')(e1)
+e2 = Dense(encoding_dim)(e1)
+e2 = BatchNormalization()(e2)
+e2 = Activation('sigmoid')(e2)
 
 # bottleneck
 bottleneck = Dense(encoding_dim)(e2)
 
-# Decoder, not used rn
-encoded_input = keras.Input(shape=(encoding_dim,))
-d1 = Dense(encoding_dim, activation='relu')(bottleneck)
-d1 = keras.layers.BatchNormalization()(d1)
-d2 = Dense(encoding_dim * 5, activation='sigmoid')(d1)
-
-decoder = keras.Model(encoded_input, encoded_input)
+# Decoder, only built for autoencoder
+d1 = Dense(encoding_dim)(bottleneck)
+d1 = BatchNormalization()(d1)
+d1 = Activation('relu')(d1)
+d2 = Dense(encoding_dim * 5)(d1)
+d2 = BatchNormalization()(d2)
+d2 = Activation('sigmoid')(d2)
 output = Dense(data_dim)(d2)
 
+# Autoencoder
+autoencoder = Model(input_data, output)
+autoencoder.compile(optimizer='adam', loss='binary_crossentropy')
+
+# Separate encoder for dimension reduction later
 encoder = Model(input_data, bottleneck)
-encoder.compile(optimizer='adam', loss='mse')
 
 es = tf.keras.callbacks.EarlyStopping(monitor='loss', mode='min', verbose=1, patience=1500,
                                       restore_best_weights=True)
+
+# Standardize train data
+t = MinMaxScaler()
+t.fit(X_train)
+X_train = t.transform(X_train)
+X_val = t.transform(X_val)
+
 X_train_tf = tf.convert_to_tensor(X_train)
 X_val_tf = tf.convert_to_tensor(X_val)
 
-"""encoder.fit(X_train_tf, X_train_tf, epochs=5, batch_size=X_train.shape[0] // 100,
-                shuffle=True, callbacks=es, validation_data=(X_val_tf, X_val_tf))"""
+# Train the autoencoder
+autoencoder.fit(X_train_tf, X_train_tf, epochs=100, batch_size=X_train.shape[0] // 100,
+                shuffle=True, callbacks=es, validation_data=(X_val_tf, X_val_tf))
 
 # SVM
 spinner = Halo(text='', spinner='dots')
 spinner.start("starting svm\n")
-# preprocessing
+
 # subset X_train
 X_train, X_rest, Y_train, Y_rest = sklearn.model_selection.train_test_split(X_train, Y_train, test_size=0.9)
 X_val, X_rest, Y_val, Y_rest = sklearn.model_selection.train_test_split(X_rest, Y_rest, test_size=0.9)
 
 # Standardize train data
-t = StandardScaler()
+t = MinMaxScaler()
 t.fit(X_train)
 X_train = t.transform(X_train)
 X_val = t.transform(X_val)
@@ -139,7 +156,6 @@ Y_hat = model.predict(X_val)
 spinner.succeed()
 score = accuracy_score(Y_val, Y_hat)
 print("score:", score)
-
 
 print(f'Time elapsed: {(time.time() - start) / 60} mins')
 gc.collect()
